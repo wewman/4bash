@@ -133,7 +133,7 @@ while true; do
     #
     #  I initially was going to use `tput` since I just found out about it
     #   but this does the job anyway
-    sec=$secds
+    sec=$secs
     while [ $sec -gt 0 ]; do
         printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
         sleep 1
