@@ -57,7 +57,7 @@ case $2 in
                 rm $image
             fi
         done
-        
+
         echo Checking for Broken PNGs
         for image in $dir/*.png; do
             eof=$(xxd -s -0x04 $image | awk '{print $2 $3}')
@@ -109,7 +109,13 @@ while true; do
 
     ## This will interpret the json file and get only the `tim` and `ext`
     #   Then save it to a file so wget can use `-i` to download everything
-    cat $dir/$thread.json | jq -r '.posts | .[] | .tim?, .ext?' | sed '/null/d' | paste -s -d' \n' | tr -d ' ' | sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" > $dir/$thread.files
+    cat $dir/$thread.json \
+        | jq -r '.posts | .[] | .tim?, .ext?' \
+        | sed '/null/d' \
+        | paste -s -d' \n' \
+        | tr -d ' ' \
+        | sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" \
+        > $dir/$thread.files
 
     ## This wget line will download the files from the file using -i
     #   And using the dot style progress bar to make it pretty.
