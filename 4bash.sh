@@ -39,6 +39,8 @@ dir=./$board/$thread
 ## Refresh time
 secs=$((1 * 60))
 
+## Loop status
+loop=true
 
 ## Note, second parameter is only to clean.
 #   if the second parameter is anyting else
@@ -91,6 +93,11 @@ case $2 in
         exit
         ;;
 
+    once)
+        loop=false
+        continue
+        ;;
+
     ## If nothing is set, keep going
     *)
 esac
@@ -127,6 +134,10 @@ while true; do
     #   the files exist.
     wget -nc -P $dir/ -c -i $dir/$thread.files --progress=dot
 
+    ## Exit if requested to run once.
+    if ! $loop ; then
+        exit
+    fi
 
     ## This while loop will redo the whole thing after the given amount
     #   of refresh seconds
