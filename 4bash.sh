@@ -39,6 +39,8 @@ dir=./$board/$thread
 ## Refresh time
 secs=$((1 * 60))
 
+## Loop status
+loop=true
 
 ## Note, second parameter is only to clean.
 #   if the second parameter is anyting else
@@ -57,7 +59,7 @@ case $2 in
                 rm $image
             fi
         done
-        
+
         echo Checking for Broken PNGs
         for image in $dir/*.png; do
             eof=$(xxd -s -0x04 $image | awk '{print $2 $3}')
@@ -91,6 +93,11 @@ case $2 in
         exit
         ;;
 
+    once)
+        loop=false
+        continue
+        ;;
+
     ## If nothing is set, keep going
     *)
 esac
@@ -101,18 +108,22 @@ while true; do
     echo Updating file...
 
     ## This will get the JSON from a.4cdn.org
-    #   output it to a file quietly to save space,
+    #   output it to a file quietly to save space
     #   if file does not exist, exit
     #
     #   NOTE that it will download this every time and replace
     #     the one you have regardless if it's old or the same
+    wget -N https://a.4cdn.org/$board/thread/$thread.json -O $dir/$thread.json --quiet || { echo 'Thread deleted or does not exist.'; exit; } 
 
-    
-    wget -N https://a.4cdn.org/$board/thread/$thread.json -O $dir/$thread.json --quiet || { echo 'Thread deleted or does not exist'; exit; } 
-    
     ## This will interpret the json file and get only the `tim` and `ext`
     #   Then save it to a file so wget can use `-i` to download everything
-    cat $dir/$thread.json | jq -r '.posts | .[] | .tim?, .ext?' | sed '/null/d' | paste -s -d' \n' | tr -d ' ' | sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" > $dir/$thread.files
+    cat $dir/$thread.json \
+        | jq -r '.posts | .[] | .tim?, .ext?' \
+        | sed '/null/d' \
+        | paste -s -d' \n' \
+        | tr -d ' ' \
+        | sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" \
+        > $dir/$thread.files
 
     ## This wget line will download the files from the file using -i
     #   And using the dot style progress bar to make it pretty.
@@ -124,16 +135,21 @@ while true; do
     #   the files exist.
     wget -nc -P $dir/ -c -i $dir/$thread.files --progress=dot
 
+    ## Exit if requested to run once.
+    if ! $loop ; then
+        exit
+    fi
 
     ## This while loop will redo the whole thing after the given amount
     #   of refresh seconds
     #
     #  I initially was going to use `tput` since I just found out about it
     #   but this does the job anyway
-    while [ $secs -gt 0 ]; do
-        printf "Download complete. Refreshing in:  %02d\033[K\r" $secs
+    sec=$secs
+    while [ $sec -gt 0 ]; do
+        printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
         sleep 1
-        : $((secs--))
+        : $((sec--))
     done
 
 done
