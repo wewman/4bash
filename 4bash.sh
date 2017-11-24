@@ -109,10 +109,11 @@ while true; do
 
     ## This will get the JSON from a.4cdn.org
     #   output it to a file quietly to save space
+    #   if file does not exist, exit
     #
     #   NOTE that it will download this every time and replace
     #     the one you have regardless if it's old or the same
-    wget -N https://a.4cdn.org/$board/thread/$thread.json -O $dir/$thread.json --quiet
+    wget -N https://a.4cdn.org/$board/thread/$thread.json -O $dir/$thread.json --quiet || { echo 'Thread deleted or does not exist.'; exit; } 
 
     ## This will interpret the json file and get only the `tim` and `ext`
     #   Then save it to a file so wget can use `-i` to download everything
