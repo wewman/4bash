@@ -4,8 +4,7 @@
 ######### DEPENDANCIES #########
 ################################
 ##                            ##
-##           jq               ##
-##           curl             ##
+##            jq              ##
 ##           paste            ##
 ##                            ##
 ################################
@@ -87,9 +86,11 @@ esac
 done
 
 if $lurkmode ; then
+    catalog_temp=$(mktemp)
+    wget --quiet -O $catalog_temp "a.4cdn.org/$board/catalog.json"
     args=''
     [[ ! loop ]] && args='--once' 
-    for no in $(curl "a.4cdn.org/$board/catalog.json" -s |\
+    for no in $(cat $catalog_temp |\
 		     jq --arg regrex "$regrex" '.[] | .threads | .[] | if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
     do "$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
     done
