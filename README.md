@@ -3,4 +3,4 @@ A 4chan image downloader in bash
 
 
 # Dependancies
->=jq-1.5
+\>=jq-1.5
