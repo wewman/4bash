@@ -46,7 +46,7 @@ SCRIPT="$0"
 ## Loop status
 loop=true
 
-## timestamp of the last reply
+## Timestamp of the last reply
 last_timestamp=0
 
 ## Parse commandline arguments
@@ -198,9 +198,6 @@ while true; do
     		      then ( .tim | tostring ) + .ext?, .md5 else empty end' \
 	    	    | sed '/null/d' \
 	    	    | paste -s -d' \n' )"
-	    #| tr -d ' ' \ #TMP
-	    #| sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" \
-		#> $dir/$thread.files
 
 	## This loop will download files from the list with wget
 	#   using the dot style progress bar to make it pretty.
@@ -224,7 +221,7 @@ while true; do
     #
     #  I initially was going to use `tput` since I just found out about it
     #   but this does the job anyway
-    sec=10 #$secs #TMP
+    sec=$secs
     while [ $sec -gt 0 ]; do
 	if ! $quiet ; then
             printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
