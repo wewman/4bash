@@ -46,6 +46,8 @@ SCRIPT="$0"
 ## Loop status
 loop=true
 
+## timestamp of the last reply
+last_timestamp=0
 
 ## Parse commandline arguments
 while [[ $# -gt 0 ]]; do
@@ -55,12 +57,10 @@ case $arg in
     -q|--quiet)
 	wgetargs="$wgetargs -q"
 	quiet=true
-	shift
 	;;
     -t|--refresh-time)
 	shift
 	mins="$1"
-	shift
 	;;
     -l|--lurk)
 	lurkmode=true
@@ -68,30 +68,29 @@ case $arg in
 	board="$1"
 	regrex="$2"
 	shift
-	shift
 	;;
     -1|--once|once)
 	loop=false
-	shift
 	;;
     -c|--clean|clean)
 	cleanmode=true
-	shift
 	;;
     *)
 	url="$1"
-	shift
 	;; 
 esac
+shift
+
 done
 
+## If user selected 'lurk mode'
 if $lurkmode ; then
-    catalog_temp=$(mktemp)
-    wget --quiet -O $catalog_temp "a.4cdn.org/$board/catalog.json"
     args=''
-    [[ ! loop ]] && args='--once' 
-    for no in $(cat $catalog_temp |\
-		     jq --arg regrex "$regrex" '.[] | .threads | .[] | if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
+    [[ ! loop ]] && args='--once'
+    #TODO doc
+    for no in $(wget --quiet -O - "a.4cdn.org/$board/catalog.json" |\
+		     jq --arg regrex "$regrex" '.[] | .threads | .[] | 
+		     	      	     if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
     do "$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
     done
 
@@ -173,36 +172,51 @@ while true; do
     [[ $quiet ]] || echo Updating file...
 
     ## This will get the JSON from a.4cdn.org
-    #   output it to a file quietly to save space
-    #   if file does not exist, exit
+    #   and output it to a variable.
+    #   If file does not exist, exit
     #
     #   NOTE that it will download this every time and replace
     #     the one you have regardless if it's old or the same
-    wget -N https://a.4cdn.org/$board/thread/$thread.json -O $dir/$thread.json --quiet || { echo "Thread $board/$thread deleted or does not exist."; exit; } 
+    json="$(wget -O - -q "https://a.4cdn.org/$board/thread/$thread.json")" || { echo "Thread $board/$thread deleted or does not exist."; exit; }
 
-    ## This will interpret the json file and get only the `tim` and `ext`
-    #   Then save it to a file so wget can use `-i` to download everything
-    cat $dir/$thread.json \
-        | jq -r '.posts | .[] | .tim?, .ext?' \
-        | sed '/null/d' \
-        | paste -s -d' \n' \
-        | tr -d ' ' \
-        | sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" \
-        > $dir/$thread.files
+    ## Get last replies timestamp
+    timestamp="$(echo "$json" | jq '.posts | .[-1] | .time')"
 
-    ## This wget line will download the files from the file using -i
-    #   And using the dot style progress bar to make it pretty.
-    #
-    #  Although, I initially want it so it won't show the messages
-    #   when the files already exist, but  ... 2>&1 /dev/null
-    #   will just remove the whole wget output text
-    #  TODO Make it so it does not output any messages when
-    #   the files exist.
-    wget ${wgetargs} -nc -P $dir/ -c -i $dir/$thread.files --progress=dot
+    ## If there is new reply
+    if [[ timestamp -gt last_timestamp ]] ; then
 
-    ## Exit if requested to run once.
-    if ! $loop ; then
-        exit
+	## Safe JSON
+	echo "$json" > $dir/$thread.json
+       
+	## This will interpret the json file and create incremental list of files.
+	#   In first line jq compares timestamp of the reply with saved timestamp,
+	#   if it finds new one, in second line it adds new record to list. First list filed is `tim`+`ext` and second is `md5`.
+	#   In third line replies without files are rejected.
+	#   Then it saves list to a variable so wget can download new files
+	list="$(echo "$json"\
+	    	    | jq  --arg timestamp "$last_timestamp" -r '.posts | .[] | if ( .time >= ($timestamp | tonumber ) )
+    		      then ( .tim | tostring ) + .ext?, .md5 else empty end' \
+	    	    | sed '/null/d' \
+	    	    | paste -s -d' \n' )"
+	    #| tr -d ' ' \ #TMP
+	    #| sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" \
+		#> $dir/$thread.files
+
+	## This loop will download files from the list with wget
+	#   using the dot style progress bar to make it pretty.
+
+	while read line ; do
+	    file="${line% *}" # Extract filename form first field with parameter expansion
+	    wget ${wgetargs} -nc -P $dir/ -c --progress=dot "https://i.4cdn.org/$board/$file"
+	done<<<"$list"
+	
+	## Exit if requested to run once.
+	if ! $loop ; then
+	    exit
+	fi
+
+	## Save timestamp
+	last_timestamp=$timestamp
     fi
 
     ## This while loop will redo the whole thing after the given amount
@@ -210,7 +224,7 @@ while true; do
     #
     #  I initially was going to use `tput` since I just found out about it
     #   but this does the job anyway
-    sec=$secs
+    sec=10 #$secs #TMP
     while [ $sec -gt 0 ]; do
 	if ! $quiet ; then
             printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
