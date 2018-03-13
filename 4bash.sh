@@ -87,11 +87,13 @@ done
 if $lurkmode ; then
     args=''
     [[ $loop == false ]] && args='--once'
-    #TODO doc
+    ## In 'lurk mode' 4bash scans whole board for threads that has subject or comment matching regular expression (incasesensitive, PCRE) provided by user
     for no in $(wget --quiet -O - "a.4cdn.org/$board/catalog.json"   |\
 		     jq --arg regrex "$regrex" '.[] | .threads | .[] | 
 		     	      	     if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
-    do "$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
+    do
+	sleep 1 # Wait 1 second (reqired by API rules)
+	"$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
     done
 
     exit
@@ -212,7 +214,7 @@ while true; do
     #  I initially was going to use `tput` since I just found out about it
     #   but this does the job anyway
     sec=$secs
-    [ $sec -gt 0 ] || sec=3 # If user sets refresh time to 0 wait 3 seconds. 
+    [ $sec -gt 0 ] || sec=10 # If user sets refresh time to 0 wait 10 seconds to follow API rules. 
     while [ $sec -gt 0 ]; do
 	if ! $quiet ; then
             printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
