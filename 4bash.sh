@@ -49,6 +49,9 @@ loop=true
 ## Timestamp of the last reply
 last_timestamp=0
 
+## Useragent
+uagent='4bash'
+
 ## Parse commandline arguments
 while [[ $# -gt 0 ]]; do
 arg="$1"
@@ -88,7 +91,7 @@ if $lurkmode ; then
     args=''
     [[ $loop == false ]] && args='--once'
     ## In 'lurk mode' 4bash scans whole board for threads that has subject or comment matching regular expression (incasesensitive, PCRE) provided by user
-    for no in $(wget --quiet -O - "a.4cdn.org/$board/catalog.json"   |\
+    for no in $(wget --user-agent="$uagent" --quiet -O - "a.4cdn.org/$board/catalog.json"   |\
 		     jq --arg regrex "$regrex" '.[] | .threads | .[] | 
 		     	      	     if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
     do
@@ -181,7 +184,7 @@ while true; do
     #   and output it to a variable.
     #   If file does not exist, exit
 
-    json="$(wget -O - -q "https://a.4cdn.org/$board/thread/$thread.json")" || { echo "Thread $board/$thread deleted or does not exist."; exit; }
+    json="$(wget --user-agent="$uagent" -O - -q "https://a.4cdn.org/$board/thread/$thread.json")" || { echo "Thread $board/$thread deleted or does not exist."; exit; }
 
     ## Get last replies timestamp
     timestamp="$(echo "$json" | jq '.posts | .[-1] | .time')"
@@ -218,7 +221,7 @@ while true; do
 
 	while read line ; do
 	    file="${line#* }" # Extract filename from second field with parameter expansion
-	    wget ${wgetargs} -nc -P $dir/ -c --progress=dot "https://i.4cdn.org/$board/$file"
+	    wget --user-agent="$uagent" ${wgetargs} -nc -P $dir/ -c --progress=dot "https://i.4cdn.org/$board/$file"
 	done<<<"$list"
 	
 	## Exit if requested to run once.
