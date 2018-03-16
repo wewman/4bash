@@ -96,6 +96,9 @@ if $lurkmode ; then
 	"$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
     done
 
+    sleep 1
+    echo Done.
+    
     exit
 
 fi
@@ -126,18 +129,28 @@ if $cleanmode ; then
     #   TODO doc
 
     result=0
+
+    echo "Checking for broken files in $dir ..."
     
-    [[ -r $dir/$thread.json && -f $dir/$thread.json ]] || { echo "Unable to read from $dir/$thread.json"; exit 1; }
+    [[ -r $dir/$thread.json && -f $dir/$thread.json ]] || { echo "Unable to read from $dir/$thread.json !"; exit 1; }
     jq . $dir/$thread.json > /dev/null || { echo "$dir/$thread.json is not valid JSON!"; exit 1; }
 
-    echo "Checking for broken files in $dir..."
+    if [ ! "$board" == 'f' ] ; then
+	list="$(jq -r '.posts | .[] | .md5, ( .tim | tostring ) + .ext?' $dir/$thread.json \
+		  | sed '/null/d' \
+		  | paste -s -d' \n' )"
+    else
+	list="$(jq -r '.posts | .[] | .md5, .filename + .ext?' $dir/$thread.json \
+		  | sed '/null/d' \
+		  | paste -s -d' \n' )"
+    fi
     
     while read line ; do
-	valid_md5=`echo "${line% *}" | base64 -d | xxd -p -l 16`
-	filename="$dir/`echo "${line#* }" | tr -cd 'a-z0-9.'`"
-
+	valid_md5=`echo "${line%% *}" | base64 -d | xxd -p -l 16`
+	filename="$dir/`basename "${line#* }"`"
+	
 	if [[ -f $filename ]] ; then
-	    if [[ "$valid_md5  $filename" == `md5sum $filename` ]] ; then
+	    if [[ "$valid_md5  $filename" == `md5sum "$filename"` ]] ; then
 		[[ $quiet == false ]] && echo "file $filename: OK"
 	    else
 		[[ $quiet == false ]] && echo "file $filename: BAD_CHECKSUM"
@@ -148,9 +161,8 @@ if $cleanmode ; then
 	    [[ $quiet == false ]] && echo "file $filename: MISSING"
 	    result=1
 	fi
-    done<<<"$(jq -r '.posts | .[] | .md5, ( .tim | tostring ) + .ext?' $dir/$thread.json \
-	          | sed '/null/d' \
-	          | paste -s -d' \n' )"
+    done<<<"$list"
+    
     echo Done.
     # I set it to exit the script after cleaning
     # But it would be nice too if you can make it
@@ -180,16 +192,26 @@ while true; do
 	## Safe JSON
 	echo "$json" > "$dir/$thread.json"
 
-	## This will interpret the JSON file and create incremental list of files.
-	#   In first line jq compares timestamp of the reply with saved timestamp,
-	#   if it finds new one, in second line it adds new record to list. First list filed is `md5` (for future usage) and second is `tim`+`ext`.
-	#   In third line replies without files are rejected.
-	#   Then it saves list to a variable so wget can download new files
-	list="$(echo "$json"\
-	    	    | jq  --arg timestamp "$last_timestamp" -r '.posts | .[] | if ( .time >= ($timestamp | tonumber) )
-    		      then .md5, ( .tim | tostring ) + .ext? else empty end' \
-	    	    | sed '/null/d' \
-	    	    | paste -s -d' \n' )"
+	if [ ! "$board" == 'f' ] ; then
+	    ## This will interpret the JSON file and create incremental list of files.
+	    #   In first line jq compares timestamp of the reply with saved timestamp,
+	    #   if it finds new one, in second line it adds new record to list. First list filed is `md5` (for future usage) and second is `tim`+`ext`.
+	    #   In third line replies without files are rejected.
+	    #   Then it saves list to a variable so wget can download new files
+	    list="$(echo "$json"\
+			| jq  --arg timestamp "$last_timestamp" -r '.posts | .[] | if ( .time >= ($timestamp | tonumber) )
+			  then .md5, ( .tim | tostring ) + .ext? else empty end' \
+			| sed '/null/d' \
+			| paste -s -d' \n' )"
+	else
+	    # On /f/ link to filename is build of filename, not tim
+	    list="$(echo "$json"\
+			| jq  --arg timestamp "$last_timestamp" -r '.posts | .[] | if ( .time >= ($timestamp | tonumber) )
+			  then .md5, (.filename | @uri) + .ext? else empty end' \
+			| sed '/null/d' \
+			| paste -s -d' \n' )"	    
+	fi
+	   
 
 	## This loop will download files from the list with wget
 	#   using the dot style progress bar to make it pretty.
