@@ -46,6 +46,8 @@ SCRIPT="$0"
 ## Loop status
 loop=true
 
+## Timestamp of the last reply
+last_timestamp=0
 
 ## Parse commandline arguments
 while [[ $# -gt 0 ]]; do
@@ -55,12 +57,10 @@ case $arg in
     -q|--quiet)
 	wgetargs="$wgetargs -q"
 	quiet=true
-	shift
 	;;
     -t|--refresh-time)
 	shift
 	mins="$1"
-	shift
 	;;
     -l|--lurk)
 	lurkmode=true
@@ -68,31 +68,32 @@ case $arg in
 	board="$1"
 	regrex="$2"
 	shift
-	shift
 	;;
     -1|--once|once)
 	loop=false
-	shift
 	;;
     -c|--clean|clean)
 	cleanmode=true
-	shift
 	;;
     *)
 	url="$1"
-	shift
 	;; 
 esac
+shift
+
 done
 
+## If user selected 'lurk mode'
 if $lurkmode ; then
-    catalog_temp=$(mktemp)
-    wget --quiet -O $catalog_temp "a.4cdn.org/$board/catalog.json"
     args=''
-    [[ ! loop ]] && args='--once' 
-    for no in $(cat $catalog_temp |\
-		     jq --arg regrex "$regrex" '.[] | .threads | .[] | if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
-    do "$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
+    [[ $loop == false ]] && args='--once'
+    ## In 'lurk mode' 4bash scans whole board for threads that has subject or comment matching regular expression (incasesensitive, PCRE) provided by user
+    for no in $(wget --quiet -O - "a.4cdn.org/$board/catalog.json"   |\
+		     jq --arg regrex "$regrex" '.[] | .threads | .[] | 
+		     	      	     if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
+    do
+	sleep 1 # Wait 1 second (reqired by API rules)
+	"$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
     done
 
     exit
@@ -120,49 +121,41 @@ secs=$(($mins * 60))
 
 
 if $cleanmode ; then
-## If clean, check for file health
-#   I know the method is cheesy, but it works
-#   TODO Optimize these loops into one?
-    echo Checking for Broken JPGs
-    for image in $dir/*.jpg; do
-	eof=$(xxd -s -0x04 $image | awk '{print $3}')
-	if [[ ! "$eof" = "ffd9" ]]; then
-	    echo Removing $image
-	    rm $image
-	fi
-    done
+    ## If clean, check for file health
+    #   TODO allow user to use path to JSON rather using link to thread.
+    #   TODO doc
 
-    echo Checking for Broken PNGs
-    for image in $dir/*.png; do
-	eof=$(xxd -s -0x04 $image | awk '{print $2 $3}')
-	if [[ ! "$eof" = "ae426082" ]]; then
-	    echo Removing $image
-	    rm $image
-	fi
-    done
+    result=0
+    
+    [[ -r $dir/$thread.json && -f $dir/$thread.json ]] || { echo "Unable to read from $dir/$thread.json"; exit 1; }
+    jq . $dir/$thread.json > /dev/null || { echo "$dir/$thread.json is not valid JSON!"; exit 1; }
 
-    echo Checking for Broken GIFs
-    for image in $dir/*.gif; do
-	eof=$(xxd -s -0x04 $image | awk '{print $3}')
-	if [[ ! "$eof" = "003b" ]]; then
-	    echo Removing $image
-	    rm $image
-	fi
-    done
+    echo "Checking for broken files in $dir..."
+    
+    while read line ; do
+	valid_md5=`echo "${line% *}" | base64 -d | xxd -p -l 16`
+	filename="$dir/`echo "${line#* }" | tr -cd 'a-z0-9.'`"
 
-    echo Checking for Broken WEBMs
-    for image in $dir/*.webm; do
-	eof=$(xxd -s -0x04 $image | awk '{print $3}')
-	if [[ ! "$eof" = "8104" ]]; then
-	    echo Removing $image
-	    rm $image
+	if [[ -f $filename ]] ; then
+	    if [[ "$valid_md5  $filename" == `md5sum $filename` ]] ; then
+		[[ $quiet == false ]] && echo "file $filename: OK"
+	    else
+		[[ $quiet == false ]] && echo "file $filename: BAD_CHECKSUM"
+		result=1
+		rm -v "$filename"
+	    fi
+	else
+	    [[ $quiet == false ]] && echo "file $filename: MISSING"
+	    result=1
 	fi
-    done
-
+    done<<<"$(jq -r '.posts | .[] | .md5, ( .tim | tostring ) + .ext?' $dir/$thread.json \
+	          | sed '/null/d' \
+	          | paste -s -d' \n' )"
+    echo Done.
     # I set it to exit the script after cleaning
     # But it would be nice too if you can make it
     # Run the script afterwards, but whatever
-    exit
+    exit $result
 fi
 
 echo "Downloading thread $board/$thread"
@@ -170,39 +163,49 @@ echo "Downloading thread $board/$thread"
 ## Loop forever until ^C or exit
 while true; do
 
-    [[ $quiet ]] || echo Updating file...
+    [[ $quiet == false ]] && echo 'Updating data...'
 
     ## This will get the JSON from a.4cdn.org
-    #   output it to a file quietly to save space
-    #   if file does not exist, exit
-    #
-    #   NOTE that it will download this every time and replace
-    #     the one you have regardless if it's old or the same
-    wget -N https://a.4cdn.org/$board/thread/$thread.json -O $dir/$thread.json --quiet || { echo "Thread $board/$thread deleted or does not exist."; exit; } 
+    #   and output it to a variable.
+    #   If file does not exist, exit
 
-    ## This will interpret the json file and get only the `tim` and `ext`
-    #   Then save it to a file so wget can use `-i` to download everything
-    cat $dir/$thread.json \
-        | jq -r '.posts | .[] | .tim?, .ext?' \
-        | sed '/null/d' \
-        | paste -s -d' \n' \
-        | tr -d ' ' \
-        | sed -e "s/^/https:\/\/i.4cdn.org\/$board\//" \
-        > $dir/$thread.files
+    json="$(wget -O - -q "https://a.4cdn.org/$board/thread/$thread.json")" || { echo "Thread $board/$thread deleted or does not exist."; exit; }
 
-    ## This wget line will download the files from the file using -i
-    #   And using the dot style progress bar to make it pretty.
-    #
-    #  Although, I initially want it so it won't show the messages
-    #   when the files already exist, but  ... 2>&1 /dev/null
-    #   will just remove the whole wget output text
-    #  TODO Make it so it does not output any messages when
-    #   the files exist.
-    wget ${wgetargs} -nc -P $dir/ -c -i $dir/$thread.files --progress=dot
+    ## Get last replies timestamp
+    timestamp="$(echo "$json" | jq '.posts | .[-1] | .time')"
 
-    ## Exit if requested to run once.
-    if ! $loop ; then
-        exit
+    ## If there is new reply...
+    if [[ timestamp -gt last_timestamp ]] ; then
+
+	## Safe JSON
+	echo "$json" > "$dir/$thread.json"
+
+	## This will interpret the JSON file and create incremental list of files.
+	#   In first line jq compares timestamp of the reply with saved timestamp,
+	#   if it finds new one, in second line it adds new record to list. First list filed is `md5` (for future usage) and second is `tim`+`ext`.
+	#   In third line replies without files are rejected.
+	#   Then it saves list to a variable so wget can download new files
+	list="$(echo "$json"\
+	    	    | jq  --arg timestamp "$last_timestamp" -r '.posts | .[] | if ( .time >= ($timestamp | tonumber) )
+    		      then .md5, ( .tim | tostring ) + .ext? else empty end' \
+	    	    | sed '/null/d' \
+	    	    | paste -s -d' \n' )"
+
+	## This loop will download files from the list with wget
+	#   using the dot style progress bar to make it pretty.
+
+	while read line ; do
+	    file="${line#* }" # Extract filename from second field with parameter expansion
+	    wget ${wgetargs} -nc -P $dir/ -c --progress=dot "https://i.4cdn.org/$board/$file"
+	done<<<"$list"
+	
+	## Exit if requested to run once.
+	if ! $loop ; then
+	    exit
+	fi
+
+	## Save timestamp
+	last_timestamp=$timestamp
     fi
 
     ## This while loop will redo the whole thing after the given amount
@@ -211,6 +214,7 @@ while true; do
     #  I initially was going to use `tput` since I just found out about it
     #   but this does the job anyway
     sec=$secs
+    [ $sec -gt 0 ] || sec=10 # If user sets refresh time to 0 wait 10 seconds to follow API rules. 
     while [ $sec -gt 0 ]; do
 	if ! $quiet ; then
             printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
@@ -218,5 +222,6 @@ while true; do
 	sleep 1
         : $((sec--))
     done
+    [[ $quiet == false ]] && echo # Print newline
 
 done
