@@ -214,15 +214,18 @@ while true; do
 			| sed '/null/d' \
 			| paste -s -d' \n' )"	    
 	fi
-	   
+
+	
 
 	## This loop will download files from the list with wget
 	#   using the dot style progress bar to make it pretty.
 
 	while read line ; do
+	    [ ! "$line" ] && break # If filename is empty (empty list, there is no new file), break
 	    file="${line#* }" # Extract filename from second field with parameter expansion
 	    wget --user-agent="$uagent" ${wgetargs} -nc -P $dir/ -c --progress=dot "https://i.4cdn.org/$board/$file"
 	done<<<"$list"
+
 	
 	## Exit if requested to run once.
 	if ! $loop ; then
