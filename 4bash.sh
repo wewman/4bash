@@ -34,11 +34,17 @@ quiet=false
 ## Download all threads with subject or comment maching regular expression (PCRE, incasesensetive)
 lurkmode=false
 
+## Lurk daemon mode
+lurkd=false
+
 ## Remove broken files
 cleanmode=false
 
 ## Refresh time
 mins=1
+
+## 'Lurk daemon' interval
+lmins=15
 
 ## Path to 4bash
 SCRIPT="$0"
@@ -51,6 +57,22 @@ last_timestamp=0
 
 ## Useragent
 uagent='4bash'
+
+function cwait {
+    #  I initially was going to use `tput` since I just found out about it
+    #   but this does the job anyway
+    sec=$1
+    [ $sec -gt 0 ] || sec=10 # If user sets refresh time to 0 wait 10 seconds to follow API rules. 
+    while [ $sec -gt 0 ]; do
+	if ! $quiet ; then
+            printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
+	fi
+	sleep 1
+        : $((sec--))
+    done
+    [[ $quiet == false ]] && echo # Print newline
+}
+
 
 ## Parse commandline arguments
 while [[ $# -gt 0 ]]; do
@@ -65,12 +87,19 @@ case $arg in
 	shift
 	mins="$1"
 	;;
+    --scan-interval)
+	shift
+	lmins="$1"	
+	;;
     -l|--lurk)
 	lurkmode=true
 	shift
 	board="$1"
 	regrex="$2"
 	shift
+	;;
+    --daemon)
+	lurkd=true
 	;;
     -1|--once|once)
 	loop=false
@@ -86,22 +115,41 @@ shift
 
 done
 
+## Lurkd interval in seconds
+lsecs=$(($lmins * 60))
+
 ## If user selected 'lurk mode'
 if $lurkmode ; then
     args=''
+    last_timestamp=0
     [[ $loop == false ]] && args='--once'
     ## In 'lurk mode' 4bash scans whole board for threads that has subject or comment matching regular expression (incasesensitive, PCRE) provided by user
-    for no in $(wget --user-agent="$uagent" --quiet -O - "a.4cdn.org/$board/catalog.json"   |\
-		     jq --arg regrex "$regrex" '.[] | .threads | .[] | 
-		     	      	     if (.com + "\n" + .sub | test( $regrex;"i" )) then .no  else empty end? ')
-    do
-	sleep 1 # Wait 1 second (reqired by API rules)
-	"$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
-    done
+    # TODO doc
+    while true ; do
+	list_tstamp="$(wget --user-agent="$uagent" --quiet -O - "a.4cdn.org/$board/catalog.json" |\
+	    jq --arg ltstamp "$last_timestamp" --arg regrex "$regrex" \
+	    '{timestamp:([.[] | .threads | .[] |.tim] | sort | .[-1]), 
+	      no:[.[] | .threads | .[] | if ( (.tim > ($ltstamp | tonumber)) and (.com + "\n" + .sub | test( $regrex;"i" )) ) 
+	      	      		       	 then .no else empty end?] }' )"
+	
 
-    sleep 1
-    echo Done.
-    
+	last_timestamp=$(jq '.timestamp'<<<"$list_tstamp")
+
+	for no in $(jq '.no | .[]'<<<"$list_tstamp")
+	do
+	    sleep 1 # Wait 1 second (reqired by API rules)
+	    "$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
+	done
+
+	sleep 1
+	echo Done.
+	
+	[[ $lurkd == false ]] && break
+
+	cwait $lsecs	
+
+    done
+        
     exit
 
 fi
@@ -215,8 +263,6 @@ while true; do
 			| paste -s -d' \n' )"	    
 	fi
 
-	
-
 	## This loop will download files from the list with wget
 	#   using the dot style progress bar to make it pretty.
 
@@ -236,20 +282,8 @@ while true; do
 	last_timestamp=$timestamp
     fi
 
-    ## This while loop will redo the whole thing after the given amount
+    ## This function will redo the whole thing after the given amount
     #   of refresh seconds
-    #
-    #  I initially was going to use `tput` since I just found out about it
-    #   but this does the job anyway
-    sec=$secs
-    [ $sec -gt 0 ] || sec=10 # If user sets refresh time to 0 wait 10 seconds to follow API rules. 
-    while [ $sec -gt 0 ]; do
-	if ! $quiet ; then
-            printf "Download complete. Refreshing in:  %02d\033[K\r" $sec
-	fi
-	sleep 1
-        : $((sec--))
-    done
-    [[ $quiet == false ]] && echo # Print newline
+    cwait $secs
 
 done
