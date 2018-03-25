@@ -94,7 +94,7 @@ case $arg in
     -l|--lurk)
 	lurkmode=true
 	shift
-	board="$1"
+	boards="$1"
 	regrex="$2"
 	shift
 	;;
@@ -121,35 +121,36 @@ lsecs=$(($lmins * 60))
 ## If user selected 'lurk mode'
 if $lurkmode ; then
     args=''
-    last_timestamp=0
+    last_timestamp='"null"'
     [[ $loop == false ]] && args='--once'
     ## In 'lurk mode' 4bash scans whole board for threads that has subject or comment matching regular expression (incasesensitive, PCRE) provided by user
     # TODO doc
     while true ; do
-	list_tstamp="$(wget --user-agent="$uagent" --quiet -O - "a.4cdn.org/$board/catalog.json" |\
-	    jq --arg ltstamp "$last_timestamp" --arg regrex "$regrex" \
-	    '{timestamp:([.[] | .threads | .[] |.tim] | sort | .[-1]), 
-	      no:[.[] | .threads | .[] | if ( (.tim > ($ltstamp | tonumber)) and (.com + "\n" + .sub | test( $regrex;"i" )) ) 
-	      	      		       	 then .no else empty end?] }' )"
-	
+	for board in ${boards//,/ } ; do
+	    json="$(wget --user-agent="$uagent" --quiet -O - "a.4cdn.org/$board/catalog.json" |\
+		jq --arg board "$board" --arg last_timestamp "$last_timestamp" --arg regrex "$regrex" \
+		'{'$board':{timestamp:([.[] | .threads | .[] |.tim] | sort | .[-1]), 
+		 no:[.[] | .threads | .[] | if ( .tim > ('$last_timestamp' | fromjson | .'$board' // 0) and (.com + "\n" + .sub | test( $regrex;"i" )) ) 
+					     then .no else empty end?] }}' )"
 
-	last_timestamp=$(jq '.timestamp'<<<"$list_tstamp")
+	    for no in $(jq --arg board "$board" '.'$board' | .no | .[]'<<<"$json")
+	    do
+		sleep 1 # Wait 1 second (reqired by API rules)
+		"$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
+	    done
 
-	for no in $(jq '.no | .[]'<<<"$list_tstamp")
-	do
-	    sleep 1 # Wait 1 second (reqired by API rules)
-	    "$SCRIPT" --quiet $args --refresh-time "$mins" "https://boards.4chan.org/$board/thread/$no" &
+	    sleep 1
+	    echo "Scanning /$board/ done."
+
+	    [[ $lurkd == false ]] && break
+	    
+	    last_timestamp=$(jq --arg board "$board" --arg last_timestamp "$last_timestamp" \
+				'( ('$last_timestamp' | fromjson) + ({ '$board':(.'$board' | .timestamp)}) ) | tojson'<<<"$json")
 	done
-
-	sleep 1
-	echo Done.
-	
-	[[ $lurkd == false ]] && break
-
-	cwait $lsecs	
+	cwait $lsecs
 
     done
-        
+	
     exit
 
 fi
