@@ -17,9 +17,9 @@
 ##     script.sh <url>        ##
 ##                            ##
 ##  To download all threads   ##
-##  that match regrex:        ##
+##  that match regex:         ##
 ##     script.sh -l\          ##
-##     <board> <regrex>       ##
+##     <board> <regex>        ##
 ##                            ##
 ##  To clean:                 ##
 ##     script.sh <url> clean  ##
@@ -95,7 +95,7 @@ case $arg in
 	lurkmode=true
 	shift
 	boards="$1"
-	regrex="$2"
+	regex="$2"
 	shift
 	;;
     --daemon)
@@ -128,9 +128,9 @@ if $lurkmode ; then
     while true ; do
 	for board in ${boards//,/ } ; do
 	    json="$(wget --user-agent="$uagent" --quiet -O - "a.4cdn.org/$board/catalog.json" |\
-		jq --arg board "$board" --arg last_timestamp "$last_timestamp" --arg regrex "$regrex" \
+		jq --arg board "$board" --arg last_timestamp "$last_timestamp" --arg regex "$regex" \
 		'{'$board':{timestamp:([.[] | .threads | .[] |.tim] | sort | .[-1]), 
-		 no:[.[] | .threads | .[] | if ( .tim > ('$last_timestamp' | fromjson | .'$board' // 0) and (.com + "\n" + .sub | test( $regrex;"i" )) ) 
+		 no:[.[] | .threads | .[] | if ( .tim > ('$last_timestamp' | fromjson | .'$board' // 0) and (.com + "\n" + .sub | test( $regex;"i" )) ) 
 					     then .no else empty end?] }}' )"
 
 	    for no in $(jq --arg board "$board" '.'$board' | .no | .[]'<<<"$json")
@@ -144,8 +144,8 @@ if $lurkmode ; then
 
 	    [[ $lurkd == false ]] && break
 	    
-	    last_timestamp=$(jq --arg board "$board" --arg last_timestamp "$last_timestamp" \
-				'( ('$last_timestamp' | fromjson) + ({ '$board':(.'$board' | .timestamp)}) ) | tojson'<<<"$json")
+	    [[ $loop == false ]] || last_timestamp=$(jq --arg board "$board" --arg last_timestamp "$last_timestamp" \
+							'( ('$last_timestamp' | fromjson) + ({ '$board':(.'$board' | .timestamp)}) ) | tojson'<<<"$json")
 	done
 	cwait $lsecs
 
