@@ -141,12 +141,11 @@ if $lurkmode ; then
 
 	    sleep 1
 	    echo "Scanning /$board/ done."
-
-	    [[ $lurkd == false ]] && break
 	    
 	    [[ $loop == false ]] || last_timestamp=$(jq --arg board "$board" --arg last_timestamp "$last_timestamp" \
 							'( ('$last_timestamp' | fromjson) + ({ '$board':(.'$board' | .timestamp)}) ) | tojson'<<<"$json")
 	done
+	[[ $lurkd == false ]] && break
 	cwait $lsecs
 
     done
